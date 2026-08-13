@@ -1,0 +1,24 @@
+{
+  "name": "vantedge",
+  "owner": {
+    "name": "VantEdge Labs",
+    "email": "support@vantedgelabs.com",
+    "url": "https://github.com/VantEdgeLabs"
+  },
+  "plugins": [
+    {
+      "name": "vantedge",
+      "source": "./",
+      "description": "Skills + docs that teach Claude how to build, deploy, observe, and troubleshoot VantEdge agent apps via the vantedge-cli.",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": [
+        "vantedge",
+        "agent-apps",
+        "temporal",
+        "llm-observability",
+        "cli"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "vantedge",
+  "version": "0.1.0",
+  "description": "Skills and reference material for building, deploying, and observing agent apps on the VantEdge platform via the vantedge-cli.",
+  "author": {
+    "name": "VantEdge Labs",
+    "email": "support@vantedgelabs.com",
+    "url": "https://vantedge.run"
+  },
+  "homepage": "https://github.com/VantEdgeLabs/vantedge-claude-plugin",
+  "repository": "https://github.com/VantEdgeLabs/vantedge-claude-plugin",
+  "license": "MIT",
+  "keywords": [
+    "vantedge",
+    "agent-apps",
+    "temporal",
+    "llm-observability",
+    "cli"
+  ]
+}
