@@ -59,6 +59,9 @@ vantedge-cli --version
 | `secrets show <name>` | Show metadata for one secret (value is NEVER returned — matches AWS SM console). |
 | `secrets delete <name> [--force] [--yes]` | Delete a secret; `--force` bypasses the "in use by apps" guard. |
 | `secrets in-use <name>` | List which apps bind this secret before you mutate it. |
+| `models tiers` | List the sdk-agents profile's tier → chain mapping. |
+| `models tier <name>` | Show one tier's mapping (`low`, `medium`, or `high`). |
+| `models list` | List all chains registered on the gateway. |
 
 ## Authentication
 

@@ -54,7 +54,8 @@ async def answer_question(question: str) -> dict:
             "for a business audience. Do not invent numbers.\n\n"
             f"Question: {question}\n\n"
             f"Rows ({len(rows)}):\n{rows[:20]}"    # cap at 20 for the LLM context
-        )
+        ),
+        complexity="medium",   # medium: reasoning over rows + coherent prose generation
     )
     summary = summary_response["text"]
 
@@ -308,7 +309,8 @@ async def check_and_alert() -> dict:
                 f"Customer history: {stats.get('order_count', 0)} orders, "
                 f"${stats.get('lifetime_value', 0)} lifetime value.\n\n"
                 "Style: neutral, actionable, no emojis."
-            )
+            ),
+            complexity="low",   # low: single-shot short generation from a tiny structured context
         )
         text = draft["text"]
 
@@ -481,7 +483,8 @@ async def score_new_leads() -> dict:
                 f"Name: {lead['name']}\n"
                 f"Company: {lead['company']}\n"
                 f"Message: {lead['message']}"
-            )
+            ),
+            complexity="low",   # low: classification / single-number extraction from short context
         )
         try:
             score = float(scoring["text"].strip())

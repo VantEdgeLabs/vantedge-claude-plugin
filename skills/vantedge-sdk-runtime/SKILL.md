@@ -230,6 +230,7 @@ async def summarize(long_text: str) -> str:
 
     response = await gateway.llm(
         prompt="Summarize this in 2 sentences:\n\n" + long_text,
+        complexity="medium",
         temperature=0.0,
         max_tokens=8000,
     )
@@ -237,6 +238,18 @@ async def summarize(long_text: str) -> str:
 ```
 
 Return shape: `{"text": str, "model": str, "usage": {"input_tokens": int, "output_tokens": int}}`.
+
+## Picking complexity for LLM calls
+
+Every `llm()` call takes a `complexity` argument (`"low"`, `"medium"`, or `"high"`) that the backend uses to route the call to a specific chain. Always specify it at the call site — the default `"medium"` exists only so legacy apps keep working, new code should be explicit about what capability tier it needs.
+
+For the full tier-picking guide, see the [[vantedge-complexity-tiers]] skill.
+
+Signature example:
+
+```python
+await llm(prompt=…, complexity="medium")
+```
 
 ### Class-based form: `LLMGateway`
 
@@ -289,7 +302,8 @@ async def query_and_summarize(question: str) -> dict:
 
     # 2. Call the LLM to shape it
     summary_response = await gateway.llm(
-        prompt=f"Summarize these rows in 2-3 sentences:\n\n{result['rows']}"
+        prompt=f"Summarize these rows in 2-3 sentences:\n\n{result['rows']}",
+        complexity="medium",
     )
 
     # 3. Optionally write back or take an action
