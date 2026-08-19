@@ -25,7 +25,7 @@ vantedge-cli --version
 | `VANTEDGE_API_KEY` | Override the stored API key | Rarely — mostly for CI. `login` writes this to the credentials file. |
 | `VANTEDGE_PLATFORM_URL` | Override backend base URL | Local minikube dev: `https://minikube-api.vantedge.run`. Prod: unset (default). |
 | `VANTEDGE_TLS_CA_BUNDLE` | Path to CA bundle | Local mkcert-signed backends only: `$(mkcert -CAROOT)/rootCA.pem` |
-| `VANTEDGE_BASE_IMAGE` | Override default base image tag for `init`/`deploy --build` | Rarely — CI or when pinning to a specific base version |
+| `VANTEDGE_BASE_IMAGE` | Override the base runtime image the app builds FROM | Rarely — CI or when pinning to a specific base version |
 
 ## Commands — quick reference
 
@@ -35,7 +35,7 @@ vantedge-cli --version
 | `logout` | Clear stored credentials |
 | `whoami` | Show current user + default workspace |
 | `init <name> [--web]` | Scaffold a new agent app directory |
-| `deploy <name> --build [--env K=V] [--web]` | Build + push + deploy an app |
+| `deploy <name>` | Build (server-side) + deploy an app. Web UI / env vars / secrets are declared in `vantedge.yaml`, not flags. |
 | `apps` | List apps in your workspace (yours + shared) |
 | `sources` | List connected data sources |
 | `schema <source> [table]` | Fetch column-level schema for one or all tables |
@@ -107,13 +107,13 @@ The scaffold gives you:
 |---|---|
 | `vantedge.yaml` | The app manifest — name, base_image, entry module, web config |
 | `app.py` | Stub with `@workflow.defn` + `@activity.defn` + `WORKFLOWS`/`ACTIVITIES` exports |
-| `Dockerfile` | `FROM {base_image}` — builds on top of vantedge-app-base (v0.3.0, includes SDK 0.3.0 with `gateway.llm`) |
+| `Dockerfile` | `FROM {base_image}` — builds on top of vantedge-app-base (v0.5.5 default, includes SDK ≥0.6.0 with attribution v1 headers) |
 | `requirements.txt` | `vantedge[runtime]` (+ `web` if --web) |
 | `.env.example` | Documents the env vars for local dev |
 | `.dockerignore`, `README.md` | Standard hygiene |
 | `web.py`, `store.py` | Only with `--web` — FastAPI + shared in-proc sqlite |
 
-**After `init`, next steps:** describe intent to Claude Code, deploy with `deploy --build`.
+**After `init`, next steps:** describe intent to Claude Code, deploy with `vantedge-cli deploy <name>` (server-side build; no local Docker needed).
 
 ## Configuring output delivery (manifest `outputs:` block)
 
@@ -125,12 +125,13 @@ Add an `outputs:` block to `vantedge.yaml`:
 
 ```yaml
 name: hubspot-deal-digest
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.3.0
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 web:
   enabled: false
 triggers: []
 data_sources: [hubspot]        # canonical provider names — see agent-recipes.md
+egress_allowlist: []           # outbound public domains this app may reach; empty = no egress
 
 outputs:
   email:
@@ -162,48 +163,61 @@ Fields:
 
 ## Deploying an app
 
-### `deploy` — build + push + provision
+### `deploy` — build (server-side) + provision
 
 ```bash
-# The common case: build locally, push to platform registry, deploy
-vantedge-cli deploy slack-digest --build
+# The common case: server-side build, no local Docker or registry creds needed
+vantedge-cli deploy slack-digest
 
-# With web UI
-vantedge-cli deploy slack-digest --build --web
+# Same, with jargon-free progress OFF (raw docker logs + full JSON response)
+vantedge-cli deploy slack-digest --verbose
 
-# With env vars for external service secrets (Twilio, Stripe, etc.)
-vantedge-cli deploy slack-digest --build --env TWILIO_KEY=xxx --env SENDGRID_KEY=yyy
+# App needs public HTTPS (Twilio, Stripe, etc.) — LLM calls DON'T need this
+vantedge-cli deploy slack-digest --allow-internet
 
-# Skip build (image already pushed elsewhere)
+# Deploy an already-built image (skip build entirely)
 vantedge-cli deploy slack-digest --image myregistry.example.com/slack-digest:v1.2
+
+# Escape hatch: build LOCALLY (needs Docker + registry creds). Rare — CI, offline
+vantedge-cli deploy slack-digest --local-build --image myregistry.example.com/slack-digest:v1.2
 ```
+
+**Web UI, env vars, secrets bindings, egress allowlist, data sources, output delivery — all declared in `vantedge.yaml`, not CLI flags.** See the manifest reference sections below and the schema in `vantedge-cli init`'s scaffolded file.
 
 **Flags:**
 
 | Flag | Purpose |
 |---|---|
-| `--build` | Runs `docker build` + `docker push` before deploying. Requires a Docker daemon and registry access. |
-| `--image <tag>` | Skip build, deploy an existing image. Mutually exclusive with `--build`. |
-| `--env K=V` (repeatable) | Inject env vars into the worker pod (for secrets to external services) |
-| `--web` | Serve the app's web UI at a per-app URL |
-| `--allow-internet` | Open public HTTPS egress. **Rarely needed** — LLM calls route through `gateway.llm()` (in `vantedge.tools.gateway`), not directly to Anthropic/OpenAI. Use only for third-party services (Twilio, Stripe, etc.) not covered by connectors. |
-| `--dry-run` | Preview what will be deployed without provisioning |
+| _(no flag)_ | Default — server-side build. Platform builds + pushes + deploys. No local Docker or AWS/ECR creds needed. |
+| `--image <tag>` | Skip build, deploy an already-built image (repo:tag or repo@digest). |
+| `--local-build` | Build+push LOCALLY with docker buildx (needs Docker + registry creds). Requires `--image` as the push target. For offline/air-gapped or CI that already has ECR creds. |
+| `--allow-internet` | Open public HTTPS egress. **Rarely needed** — LLM calls route through `gateway.llm()`, not directly to Anthropic/OpenAI. Use only for third-party services (Twilio, Stripe, etc.). |
+| `--base-image <ref>` | Override the base runtime image the app Dockerfile builds FROM. Falls back to `VANTEDGE_BASE_IMAGE` env var, then the `base_image:` key in `vantedge.yaml`. |
+| `--build-context <dir>` | Build context directory (default: `.`). Applies to server-side and `--local-build` alike. |
+| `--push-image <tag>` | Image tag to push when `--local-build` is set; defaults to `--image`. Used only when the push endpoint differs from the pull endpoint (e.g. local minikube-registry vs localhost:5000). |
+| `--dry-run` | Mint token + build config only; don't provision |
+| `--verbose` / `-v` | Show raw docker build logs, image digests, and the full JSON deploy response. Default is jargon-free milestones (`Preparing your app…` / `Building your app…` / `Publishing your app…` / `Getting it ready to run…`). |
 
 **Deploy is idempotent by `(workspace, name)`** — running `deploy` again on the same name updates the existing app in place (image rolled, ArgoCD Application updated). No dupes, no rename.
 
 **Agents deploy as PRIVATE by default.** Only the creator can invoke or see the app. Explicitly publish to share (see `publish` below).
 
-**Output on success:**
+**Output on success (default, server-side, jargon-free):**
 
 ```
-✓ Built slack-digest:2026-07-28-abc123
-✓ Pushed to registry
-✓ Deployed via ArgoCD
-✓ Pod ready
+Building slack-digest on the platform ...
+Waiting for a build slot ...
+Preparing your app ...
+Building your app ...
+Publishing your app ...
+Getting it ready to run ...
+✓ Deployed
 
-Web URL:   https://dashboard.vantedge.run/apps/3/slack-digest/    (if --web)
+Web URL:   https://dashboard.vantedge.run/apps/3/slack-digest/    (if web.enabled in manifest)
 Dashboard: https://dashboard.vantedge.run/apps/slack-digest
 ```
+
+Pass `--verbose` for raw docker build logs, resolved image digest, and the full JSON deploy response.
 
 ## Publishing to the workspace catalog
 
@@ -429,7 +443,7 @@ vantedge-cli schema postgres
 # Now describe intent to Claude Code (or write app.py yourself)
 # ...
 
-vantedge-cli deploy my-agent --build
+vantedge-cli deploy my-agent
 # ✓ Deployed as PRIVATE
 
 # Smoke test
@@ -448,9 +462,9 @@ vantedge-cli publish my-agent \
 ```bash
 cd my-agent
 # Edit app.py to fix a bug or add a feature
-vantedge-cli deploy my-agent --build     # idempotent redeploy
+vantedge-cli deploy my-agent               # idempotent redeploy
 vantedge-cli start my-agent --workflow MyWorkflow  # smoke test
-vantedge-cli logs my-agent --tail 100    # verify
+vantedge-cli logs my-agent --tail 100      # verify
 ```
 
 ### Debug a failed run
@@ -471,16 +485,16 @@ vantedge-cli connectors add hubspot         # browser → OAuth → back
 vantedge-cli schema hubspot                 # discover tables
 vantedge-cli init hubspot-lead-scorer
 # ... write workflow ...
-vantedge-cli deploy hubspot-lead-scorer --build
+vantedge-cli deploy hubspot-lead-scorer
 ```
 
 ## Gotchas
 
-- **`--allow-internet` is rarely needed.** LLM calls should use `gateway.llm(...)` from `vantedge.tools.gateway`, which routes through the platform (no user-managed API keys, workspace-attributed logging). Use `--allow-internet` only for third-party services not covered by a connector (Twilio, Stripe webhooks).
+- **`--allow-internet` is rarely needed.** LLM calls should use `gateway.llm(...)` from `vantedge.tools.gateway`, which routes through the platform (no user-managed API keys, workspace-attributed logging). Use `--allow-internet` only for third-party services not covered by a connector (Twilio, Stripe webhooks). Prefer the manifest's `egress_allowlist:` for granular per-domain access instead of opening full public HTTPS.
 - **`deploy` overwrites in place.** Redeploying a shared app immediately affects all subscribers. There's no versioning or rollback UI in v1 — bump the image tag manually if you need to revert (`--image myregistry/my-agent:v1.2.3` for the old tag).
 - **Directory rename ≠ app rename.** If you `mv my-agent renamed-agent && vantedge-cli deploy renamed-agent`, you'll create a new app named `renamed-agent` while `my-agent` still exists in the workspace. Use `apps` to see what's actually deployed before deploying under a new name.
 - **`schema` returns live schemas, not a stale snapshot.** If the underlying data source's schema changes, the next `schema` call reflects it.
-- **Env vars set via `--env` are per-app-per-deploy.** They don't persist across deploys — re-specify them each time. Encrypted secrets vault is planned for v2.
+- **Env vars go through workspace secrets + manifest binding, not CLI flags.** Store the value once with `secrets set`, then bind it in `vantedge.yaml` under `secrets:` — deploys mount it into the pod. Rotating a secret's value doesn't require re-editing the manifest. (There is no `--env` flag on `deploy` anymore.)
 - **Chat-scoped connectors don't show up in `sources`.** Only workspace-level connectors do. If a user uploaded an Excel file to Atlas as a temporary connector, agents can't reach it.
 
 ## What CLI users should NOT do
@@ -495,12 +509,12 @@ vantedge-cli deploy hubspot-lead-scorer --build
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `login` opens browser but callback never returns | Firewall blocked `localhost:<port>` | Use the device-code fallback: run `login --headless` |
-| `deploy --build` fails with "docker not found" | No local Docker | Install Docker or use `--image` to skip build |
+| `deploy --local-build` fails with "docker not found" | No local Docker | Drop `--local-build` to use the default server-side path (no Docker needed), or install Docker |
 | `deploy` succeeds but pod never becomes ready | Import error in `app.py` or missing dep in `requirements.txt` | `vantedge-cli logs <app> --tail 100` to see the traceback |
 | Runs error with `VANTEDGE_API_URL not set` | Backend env var missing (only happens locally when running `python -m app` outside a pod) | Set env vars in a local `.env` file per `.env.example` |
 | `sources` returns empty | No connectors set up yet | `vantedge-cli connectors add <type>` |
 | Query fails with "column does not exist" | Claude Code guessed schema | `vantedge-cli schema <source> <table>` first, then rewrite SQL |
-| App can't reach external service (Twilio, etc.) | Sandbox egress closed by default | `vantedge-cli deploy <app> --allow-internet` (or wait for secrets vault + curated integrations) |
+| App can't reach external service (Twilio, etc.) | Sandbox egress closed by default | Add the domain(s) to `egress_allowlist:` in `vantedge.yaml` and redeploy, or `deploy --allow-internet` to open public HTTPS wholesale |
 
 ## LLM usage & cost attribution
 
@@ -546,8 +560,8 @@ Reference it in `vantedge.yaml`:
 
 ```yaml
 secrets:
-  - name: prod-db-url
-    env: DB_URL
+  - name: DB_URL              # POSIX env var name inside the pod
+    from: prod-db-url         # workspace secret slug (what `secrets set` created)
 ```
 
 **Write-only.** The platform never returns a secret value after write — no `show --reveal`, no runtime `get`. Lose it, `set` a new one, redeploy binders. Full reference: `secrets.md`.

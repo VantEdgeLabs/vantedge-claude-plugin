@@ -1,6 +1,6 @@
 ---
 name: vantedge-agent-recipes
-description: Concrete, runnable templates for the four canonical VantEdge agent shapes — analyst (on-demand NL query), scheduled ETL (recurring background), alerter (poll + notify), and dashboard-backed (--web UI over a shared store). Use this when a user asks you to build an agent that matches one of these patterns, or when you need a starter you can adapt.
+description: Concrete, runnable templates for the four canonical VantEdge agent shapes — analyst (on-demand NL query), scheduled ETL (recurring background), alerter (poll + notify), and dashboard-backed (web.enabled UI over a shared store). Use this when a user asks you to build an agent that matches one of these patterns, or when you need a starter you can adapt.
 ---
 
 # vantedge agent recipes
@@ -21,7 +21,7 @@ Four canonical shapes cover ~90% of what teams build on VantEdge. Each recipe be
 
 ```yaml
 name: analyst
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.3.0
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 web:
   enabled: false
@@ -94,7 +94,7 @@ ACTIVITIES = [answer_question]
 ### Deploy + invoke
 
 ```bash
-vantedge-cli deploy analyst --build
+vantedge-cli deploy analyst
 
 # Invoke with a question
 vantedge-cli start analyst \
@@ -127,7 +127,7 @@ vantedge-cli start analyst \
 
 ```yaml
 name: order-enrichment
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.3.0
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 web:
   enabled: false
@@ -221,7 +221,7 @@ SCHEDULES = [
 ### Deploy
 
 ```bash
-vantedge-cli deploy order-enrichment --build
+vantedge-cli deploy order-enrichment
 # Schedule fires automatically on the hour — no manual `start` needed.
 ```
 
@@ -256,7 +256,7 @@ The schedule fires **every hour on the boundary** by default. If your Temporal c
 
 ```yaml
 name: high-value-alerter
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.3.0
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 web:
   enabled: false
@@ -370,7 +370,7 @@ SCHEDULES = [
 ### Deploy
 
 ```bash
-vantedge-cli deploy high-value-alerter --build
+vantedge-cli deploy high-value-alerter
 # Fires every 5 minutes automatically.
 ```
 
@@ -398,7 +398,7 @@ Option 2 is safer for a shareable template — the agent bootstraps its own stat
 
 ---
 
-## Recipe 4 — Dashboard-backed agent (`--web`)
+## Recipe 4 — Dashboard-backed agent (`web.enabled: true`)
 
 **Shape:** background worker writes results to a shared in-process store on a schedule; a FastAPI web UI reads from that store and renders a live dashboard. One pod, one process, two entrypoints.
 
@@ -408,7 +408,7 @@ Option 2 is safer for a shareable template — the agent bootstraps its own stat
 
 ```yaml
 name: leads-dashboard
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.3.0
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 web:
   enabled: true
@@ -586,7 +586,7 @@ async def index():
 ### Deploy
 
 ```bash
-vantedge-cli deploy leads-dashboard --build --web
+vantedge-cli deploy leads-dashboard
 # Web URL: https://dashboard.vantedge.run/apps/3/leads-dashboard/
 # Worker fires every 15 min automatically.
 ```
@@ -628,7 +628,7 @@ matching connectors:
 
 ```yaml
 name: outlook-triage
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.3.0
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 data_sources: [office365]        # canonical provider name
 ```
@@ -692,7 +692,7 @@ teammate clones it into their own workspace).
    ```bash
    vantedge-cli init hubspot-deal-digest
    # ... write app.py ...
-   vantedge-cli deploy hubspot-deal-digest --build
+   vantedge-cli deploy hubspot-deal-digest
    vantedge-cli start hubspot-deal-digest --workflow DealDigestWorkflow
    ```
 

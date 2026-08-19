@@ -10,7 +10,7 @@ The `vantedge` Python package (v0.4.0) is what agent apps `import` from inside t
 - `vantedge.tools.context_router` — the data-plane client (SQL, NL queries, connector actions)
 - `vantedge.tools.gateway` — the LLM gateway (`gateway.llm(...)`, `LLMGateway`)
 - `vantedge.runtime.worker` — the generic Temporal worker (the base image runs this as its default command)
-- `vantedge.runtime.app` — combined worker + web ASGI server (for `--web` apps)
+- `vantedge.runtime.app` — combined worker + web ASGI server (for apps with `web.enabled: true` in `vantedge.yaml`)
 - `vantedge.runtime.schedules.ScheduledWorkflow` — declarative scheduled workflows
 
 **0.3.0 restructure.** LLM calls used to hang off `context_router.llm(...)`;
@@ -422,7 +422,8 @@ A Temporal task queue is a shared work pool: **every worker polling a queue must
 **Fix: give each app its own task queue** when a workspace hosts more than one app:
 
 ```bash
-vantedge-cli deploy email-manager 4 --task-queue ws-4-email-manager --web --allow-internet ...
+vantedge-cli deploy email-manager 4 --task-queue ws-4-email-manager --allow-internet
+# (web UI / secrets / egress allowlist — set web.enabled + secrets: + egress_allowlist: in vantedge.yaml)
 ```
 
 The scheduled workflow's action targets the worker's queue automatically, and `ensure_schedules` **reconciles** an existing schedule to the current queue (it recreates a schedule whose queue drifted) — so moving an app to a new queue "just works" on the next deploy. Symptoms of a collision to watch for in `logs`: `NotFoundError: Activity function ... is not registered on this worker, available activities: [a different app's activities]`.
@@ -503,7 +504,7 @@ VANTEDGE_PASSTHROUGH_MODULES=pydantic,my_shared_lib
 | Call an LLM | `gateway.llm(prompt=..., model=...)` | **Only way to call models** — do not import anthropic/openai. Separate module from `context_router`. |
 | Schedule your own runs | `SCHEDULES = [ScheduledWorkflow(...)]` | Declarative, idempotent |
 | Fan out work | `asyncio.gather(*execute_activity(...))` | Standard Temporal pattern |
-| Serve a web UI | Use `vantedge.runtime.app` runner + `--web` deploy flag | See recipes for pattern |
+| Serve a web UI | Use `vantedge.runtime.app` runner + set `web.enabled: true` in `vantedge.yaml` | See recipes for pattern |
 
 ## Output shape (what the platform reads)
 
@@ -661,7 +662,7 @@ Then trigger from another terminal: `vantedge-cli start my-app --workflow MyWork
 - **Do not import HTTP clients (`httpx`, `requests`) at module top.** Import inside activities.
 - **Do not perform I/O inside workflow methods** (only inside activities). Workflow bodies are deterministic replay code.
 - **Do not use `time.time()`, `random.random()`, or `datetime.now()` inside workflow methods.** Use `workflow.time()`, `workflow.random()`, `workflow.now()` instead.
-- **Do not store secrets in `app.py`.** Use `--env K=V` on deploy for per-app secrets.
+- **Do not store secrets in `app.py`.** Store the value once with `vantedge-cli secrets set <slug>`, then bind it in `vantedge.yaml` under `secrets: [{name: ENV_VAR, from: <slug>}]` — the deploy mounts it as an env var.
 - **Do not attempt to reach the router directly.** Always through the backend data-plane proxy (which the `context_router` client handles for you).
 
 ## Where to look next

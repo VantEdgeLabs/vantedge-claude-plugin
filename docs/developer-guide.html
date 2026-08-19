@@ -244,7 +244,7 @@ vantedge-cli init myapp --web       # also scaffold a web UI kit</code></pre>
       <tr><td><code>Dockerfile</code></td><td>Builds your image <code>FROM</code> the base runtime (SDK baked in).</td></tr>
       <tr><td><code>requirements.txt</code></td><td>App-only deps (base already has <code>vantedge</code> + <code>temporalio</code>).</td></tr>
       <tr><td><code>.env.example</code></td><td>Env vars for running the worker locally.</td></tr>
-      <tr><td><code>web.py</code>, <code>store.py</code> <span class="badge">--web</span></td><td>FastAPI UI + a shared in-process results store.</td></tr>
+      <tr><td><code>web.py</code>, <code>store.py</code> <span class="badge">init --web</span></td><td>FastAPI UI + a shared in-process results store. Scaffolded by <code>init --web</code>; runtime-enabled via <code>web.enabled: true</code> in <code>vantedge.yaml</code>.</td></tr>
     </table>
 
     <h3>The app-module contract</h3>
@@ -347,7 +347,7 @@ SCHEDULES = [
         <rect class="bx" x="520" y="112" width="220" height="52" rx="9"/>
         <text x="536" y="140">Data proxy → context router</text>
         <rect class="bx" x="520" y="180" width="220" height="44" rx="9"/>
-        <text x="536" y="207">Per-app URL (if --web)</text>
+        <text x="536" y="207">Per-app URL (if web.enabled)</text>
 
         <line class="arw" x1="228" y1="120" x2="518" y2="70" marker-end="url(#ah)"/>
         <text x="300" y="98" class="t2">poll / complete</text>
@@ -376,30 +376,46 @@ SCHEDULES = [
 
     <!-- ───────────────────────── LOCAL DEV ───────────────────────── -->
     <h2 id="local">Develop locally on minikube</h2>
-    <p>The local loop is: <strong>build → push → deploy</strong>, all wrapped into one command with
-      <code>--build</code>. The only local wrinkle is the registry: you <em>push</em> to
-      <code>minikube-registry.vantedge.run</code>, but in-cluster nodes <em>pull</em> via
-      <code>localhost:5000</code> (a node-local proxy to the same registry).</p>
+    <p>The default deploy path is <strong>server-side build</strong> — no local Docker or registry access
+      needed. Just <code>vantedge-cli deploy myapp 4</code> and the platform builds the image on its own
+      builder and deploys the digest. This works the same locally as on dev/prod once the CLI is pointed at
+      minikube (<code>VANTEDGE_PLATFORM_URL</code>).</p>
 
     <pre><code class="lang-bash">export VANTEDGE_API_KEY=sk_live_xxxx
 export VANTEDGE_PLATFORM_URL=https://minikube-api.vantedge.run
 export VANTEDGE_TLS_CA_BUNDLE="$(mkcert -CAROOT)/rootCA.pem"
 
 cd myapp
-# One command: build the image, push it, then deploy into workspace 4.
-vantedge-cli deploy myapp 4 --build \
+# Default: server-side build + deploy. No local Docker required.
+vantedge-cli deploy myapp 4</code></pre>
+
+    <p>The <strong>local-build escape hatch</strong> (<code>--local-build</code>) still exists for
+      offline/CI/air-gapped work where you want to build with your own <code>docker buildx</code> and push
+      to a registry the cluster can pull from. Locally on minikube, the wrinkle is that you <em>push</em>
+      to <code>minikube-registry.vantedge.run</code> but in-cluster nodes <em>pull</em> via
+      <code>localhost:5000</code>:</p>
+
+    <pre><code class="lang-bash">cd myapp
+# Escape hatch: build+push LOCALLY, then deploy.
+vantedge-cli deploy myapp 4 --local-build \
   --push-image minikube-registry.vantedge.run/myapp:0.1.0 \
   --image      localhost:5000/myapp:0.1.0 \
-  --base-image minikube-registry.vantedge.run/vantedge-app-base:0.2.2</code></pre>
+  --base-image minikube-registry.vantedge.run/vantedge-app-base:0.5.5</code></pre>
 
     <ul>
+      <li><code>--local-build</code> — build with <code>docker buildx</code> and push to <code>--push-image</code>
+        instead of the default server-side path.</li>
       <li><code>--push-image</code> — the host-facing tag the CLI pushes to (minikube registry).</li>
       <li><code>--image</code> — how the <em>node</em> pulls it (<code>localhost:5000/…</code> locally). If your
         push and pull endpoints are the same (ECR), pass <code>--image</code> alone.</li>
       <li><code>--base-image</code> — the base runtime your Dockerfile builds <code>FROM</code>. Locally, point
         at the minikube-registry base; on dev/prod it defaults to the ECR base.</li>
-      <li><code>--web</code> serve a UI at a per-app URL · <code>--allow-internet</code> open sandbox egress
-        (e.g. an app calling an external LLM directly) · <code>--dry-run</code> preview without provisioning.</li>
+      <li><code>--allow-internet</code> open sandbox egress (e.g. an app calling a third-party service like
+        Twilio; LLM calls don't need this — they route through <code>gateway.llm</code>) ·
+        <code>--dry-run</code> preview without provisioning ·
+        <code>--verbose</code> show raw docker build logs + full JSON response.</li>
+      <li>Web UI, env vars, secrets, egress allowlist, output delivery → all declared in <code>vantedge.yaml</code>,
+        not deploy flags.</li>
     </ul>
 
     <div class="note key">
@@ -410,7 +426,7 @@ vantedge-cli deploy myapp 4 --build \
         The same tag is published to ECR by CI for dev/prod (see next section).</p>
     </div>
 
-    <p><strong>Iterate.</strong> Edit <code>app.py</code>, bump the tag, re-run the same <code>deploy --build</code>.
+    <p><strong>Iterate.</strong> Edit <code>app.py</code> and re-run <code>vantedge-cli deploy myapp 4</code>.
       Redeploys are idempotent (ArgoCD upsert). Preview a run without touching the cluster with
       <code>--dry-run</code>, which prints the minted token, namespace, task queue, and full ArgoCD spec.</p>
 
@@ -509,7 +525,7 @@ vantedge-cli deploy myapp 4 \
     <table>
       <tr><th>Command</th><th>What it does</th></tr>
       <tr><td><code>init &lt;name&gt; [--web] [--base-image]</code></td><td>Scaffold a new app repo.</td></tr>
-      <tr><td><code>deploy &lt;name&gt; &lt;ws&gt; --image …</code></td><td>Deploy as a per-app worker. Flags: <code>--web</code>, <code>--web-port</code>, <code>--build</code>, <code>--build-context</code>, <code>--push-image</code>, <code>--base-image</code>, <code>--task-queue</code>, <code>--allow-internet</code>, <code>--dry-run</code>.</td></tr>
+      <tr><td><code>deploy &lt;name&gt; [ws]</code></td><td>Deploy as a per-app worker. Default: server-side build. Flags: <code>--image</code> (deploy an existing image), <code>--local-build</code> (buildx locally; needs <code>--image</code>), <code>--build-context</code>, <code>--push-image</code>, <code>--base-image</code>, <code>--task-queue</code>, <code>--allow-internet</code>, <code>--dry-run</code>, <code>--verbose</code>. Web / secrets / env / egress → <code>vantedge.yaml</code>.</td></tr>
       <tr><td><code>apps</code></td><td>List deployed apps in your org (name, url, web-enabled).</td></tr>
       <tr><td><code>sources &lt;ws&gt;</code></td><td>List a workspace's connectors (data sources).</td></tr>
       <tr><td><code>start &lt;app&gt; --workflow &lt;Type&gt; [--input] [--id]</code></td><td>Start a run (stamped with workspace + app for observability).</td></tr>
@@ -630,14 +646,20 @@ ACTIVITIES = [find_unread_deals, parse_deal, enrich_deal, evaluate_deal,
 SCHEDULES  = [ScheduledWorkflow("tracey-poll-inbox", PollInboxWorkflow, every="60s")]</code></pre>
 
     <h4>Deploy it (local minikube)</h4>
-    <pre><code class="lang-bash">vantedge-cli deploy tracey 4 --build \
+    <pre><code class="lang-bash"># Default (server-side build, no local Docker needed):
+vantedge-cli deploy tracey 4 --allow-internet
+
+# Escape hatch (local buildx to minikube registry, if you need it):
+vantedge-cli deploy tracey 4 --local-build \
   --build-context ./tracey \
   --push-image minikube-registry.vantedge.run/tracey:0.2.4 \
   --image      localhost:5000/tracey:0.2.4 \
-  --base-image minikube-registry.vantedge.run/vantedge-app-base:0.2.2 \
-  --web --allow-internet</code></pre>
-    <p><code>--web</code> serves the fund dashboard at <code>&lt;dashboard-host&gt;/apps/4/tracey/</code>;
-      <code>--allow-internet</code> lets the app reach its LLM. The schedule starts firing immediately —
+  --base-image minikube-registry.vantedge.run/vantedge-app-base:0.5.5 \
+  --allow-internet</code></pre>
+    <p>Web UI is enabled by <code>web.enabled: true</code> in <code>vantedge.yaml</code> — served at
+      <code>&lt;dashboard-host&gt;/apps/4/tracey/</code>. <code>--allow-internet</code> lets the app reach
+      the fund's third-party HTTPS endpoints (LLM calls don't need this — they go through
+      <code>gateway.llm</code>). The schedule starts firing immediately —
       watch the poller and its per-deal children appear in the Temporal UI, and processed deals show up on the
       Leads screen. To ship to dev/prod: push <code>tracey</code> to ECR, point at that backend, drop the
       local-only flags.</p>

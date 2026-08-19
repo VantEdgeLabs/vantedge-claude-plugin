@@ -166,12 +166,12 @@ For dynamic schedules (per-tenant, per-customer, computed at runtime), don't try
 
 ## The web mode
 
-Deploy with `--web` and the same pod runs the Temporal worker plus a uvicorn ASGI app (`vantedge.runtime.app` combines them). `--web` defaults `--web-port=8080` and `--web-module=web:app`. The chart renders a Service, an Ingress mounted at `https://<VANTEDGE_APP_URL_HOST>/apps/<workspace_id>/<name>/`, and two chained Traefik middlewares:
+Declare `web.enabled: true` in `vantedge.yaml` (with `web.module: web:app` and `web.port: 8080` as defaults, both overridable in the manifest) and the same pod runs the Temporal worker plus a uvicorn ASGI app (`vantedge.runtime.app` combines them). The chart renders a Service, an Ingress mounted at `https://<VANTEDGE_APP_URL_HOST>/apps/<workspace_id>/<name>/`, and two chained Traefik middlewares:
 
 - **stripprefix** — drops the `/apps/<ws>/<name>` prefix so your FastAPI routes are relative (`ingress.yaml:14-16`).
 - **authz forward-auth** — hits `apps/<name>/authz/` (`runs_views.py:105-131`), returns 2xx only if the Clerk-authenticated caller's org owns the app, and injects `X-VantEdge-Workspace` / `X-VantEdge-App` headers on success.
 
-The dashboard's session cookie flows through because the app is served under the same host. `--public-web` disables forward-auth for demos and public dashboards. `ensure_web_tls` copies the wildcard `vantedge-tls` secret into the app's namespace so Ingress TLS terminates without you managing certs.
+The dashboard's session cookie flows through because the app is served under the same host. Setting `web.public: true` in the manifest disables forward-auth for demos and public dashboards. `ensure_web_tls` copies the wildcard `vantedge-tls` secret into the app's namespace so Ingress TLS terminates without you managing certs.
 
 The **shared in-process store** pattern (`store.py` from the scaffold — a module-scope SQLite instance) is the intended bridge between activities and the ASGI app. It works because worker and web share one process; you get durability of Temporal's activity history plus zero-latency read from a live dashboard. Reach for a PVC or Postgres only when you need cross-process durability.
 
@@ -184,7 +184,7 @@ Takes an NL question via workflow input, answers via `.ask()`, returns a structu
 **vantedge.yaml**
 ```yaml
 name: analyst
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.2.2
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 web:
   enabled: false
@@ -219,7 +219,7 @@ ACTIVITIES = [ask_router]
 ```
 
 ```bash
-vantedge-cli deploy analyst <ws> --image <reg>/analyst:latest --build
+vantedge-cli deploy analyst <ws>
 ```
 
 Simplest useful shape: a durable workflow that turns free-text into a governed answer via `context_router.ask()`. The router picks the source, writes the SQL, returns rows plus a summary; the workflow adds Temporal retries so a transient LLM/warehouse blip re-runs cleanly.
@@ -231,7 +231,7 @@ Reads Postgres hourly, transforms, writes to a warehouse via `.execute()`.
 **vantedge.yaml**
 ```yaml
 name: hourly-rollup
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.2.2
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 data_sources: [prod_pg, warehouse]
 ```
@@ -282,7 +282,7 @@ SCHEDULES = [ScheduledWorkflow("hourly-rollup", RollupWorkflow, cron="0 * * * *"
 ```
 
 ```bash
-vantedge-cli deploy hourly-rollup <ws> --image <reg>/hourly-rollup:latest --build
+vantedge-cli deploy hourly-rollup <ws>
 ```
 
 Cross-connector movement on a Temporal schedule. The `SCHEDULES` export hands cron to Temporal so the platform owns firing (no cron sidecar), and `context_router` enforces which sources the app can read and write — governance travels with the query, not the pod.
@@ -294,7 +294,7 @@ Polls Slack every 5 minutes, fires a Slack DM via `.action()` when a keyword app
 **vantedge.yaml**
 ```yaml
 name: mention-alerter
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.2.2
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 data_sources: [slack]
 ```
@@ -346,19 +346,19 @@ SCHEDULES = [ScheduledWorkflow("mention-alerter", AlerterWorkflow,
 ```
 
 ```bash
-vantedge-cli deploy mention-alerter <ws> --image <reg>/mention-alerter:latest --build
+vantedge-cli deploy mention-alerter <ws>
 ```
 
 Read-then-act pattern. `.query()` covers observation, `.action()` covers side effects; both go through the same governed connector so the app never handles Slack tokens itself. The router's per-action policy layer decides whether `SendMessage` is allowed for this workspace.
 
-### Recipe 4 — Dashboard-Backed Agent (`--web`)
+### Recipe 4 — Dashboard-Backed Agent (`web.enabled: true`)
 
 Scheduled activity computes fresh KPIs, writes to the shared in-process store; `web.py` renders them.
 
 **vantedge.yaml**
 ```yaml
 name: kpi-board
-base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.2.2
+base_image: 997334016349.dkr.ecr.us-east-1.amazonaws.com/vantedge-app-base:0.5.5
 module: app
 web:
   enabled: true
@@ -402,10 +402,10 @@ SCHEDULES = [ScheduledWorkflow("kpi-board", AnalysisWorkflow,
 `web.py` and `store.py` are the scaffolded defaults from `vantedge-cli init --web` (FastAPI reading `store.all_results()`).
 
 ```bash
-vantedge-cli deploy kpi-board <ws> --image <reg>/kpi-board:latest --web --build
+vantedge-cli deploy kpi-board <ws>
 ```
 
-Combined runner: worker and ASGI app share one process, so `store.py`'s in-memory SQLite is a straight-through bridge with no PVC and no message bus. The schedule keeps the store fresh; the per-app URL returned by `deploy --web` becomes a live, auth-gated dashboard your team can bookmark.
+Combined runner: worker and ASGI app share one process, so `store.py`'s in-memory SQLite is a straight-through bridge with no PVC and no message bus. The schedule keeps the store fresh; the per-app URL returned by `deploy` (when `web.enabled: true` in the manifest) becomes a live, auth-gated dashboard your team can bookmark.
 
 ## Operational reference
 
@@ -419,7 +419,7 @@ Combined runner: worker and ASGI app share one process, so `store.py`'s in-memor
 4. Wraps it in an ArgoCD `Application` spec on the `vantedge` project pointing at `vantedge-charts/vantedge-app-worker` (line 138-179) with `automated={prune, selfHeal}`.
 5. Calls `ArgoCDClient().create_application(spec, upsert=True)` (line 227).
 
-`get_or_create(workspace, name)` makes deploy idempotent per (workspace, app name). `upsert=True` means image bumps, `--web-*` flips, and `--allow-internet` toggles all patch the existing Application; ArgoCD reconciles the diff. Redeploy is the update path — there is no separate mutation endpoint.
+`get_or_create(workspace, name)` makes deploy idempotent per (workspace, app name). `upsert=True` means image bumps, `web.*` manifest changes, and `--allow-internet` toggles all patch the existing Application; ArgoCD reconciles the diff. Redeploy is the update path — there is no separate mutation endpoint.
 
 ### Task-queue isolation
 
