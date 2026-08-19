@@ -1,6 +1,6 @@
 {
   "name": "vantedge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Skills and reference material for building, deploying, and observing agent apps on the VantEdge platform via the vantedge-cli.",
   "author": {
     "name": "VantEdge Labs",
